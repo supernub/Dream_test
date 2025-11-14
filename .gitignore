@@ -19,6 +19,7 @@ logs/
 data/
 datasets/
 checkpoints/
+output/
 *.pt
 *.ckpt
 *.h5

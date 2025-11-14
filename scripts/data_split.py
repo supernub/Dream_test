@@ -152,15 +152,103 @@ def create_donor_level_split(h5ad_path: str, output_path: str, test_size: float 
         print(f"Half-half split: {n_train} train, {n_test} test donors")
     else:
         # For larger datasets, use stratified split
-        train_donors, test_donors = train_test_split(
-            unique_donors,
-            test_size=test_size,
-            random_state=random_state,
-            stratify=donor_df.set_index('donor')['adnc']
-        )
+        # Ensure all classes are represented in training set
+        adnc_per_donor = donor_df.set_index('donor')['adnc']
+        
+        # Check if all classes are present
+        unique_adnc = adnc_per_donor.unique()
+        print(f"Available ADNC classes: {unique_adnc}")
+        
+        # Use stratified split to ensure all classes in training
+        try:
+            train_donors, test_donors = train_test_split(
+                unique_donors,
+                test_size=test_size,
+                random_state=random_state,
+                stratify=adnc_per_donor
+            )
+        except ValueError as e:
+            print(f"Stratified split failed: {e}")
+            print("Falling back to random split...")
+            train_donors, test_donors = train_test_split(
+                unique_donors,
+                test_size=test_size,
+                random_state=random_state
+            )
+        
+        # Verify all classes are in training set
+        train_adnc = adnc_per_donor[train_donors].unique()
+        test_adnc = adnc_per_donor[test_donors].unique()
+        
+        print(f"Training set ADNC classes: {train_adnc}")
+        print(f"Test set ADNC classes: {test_adnc}")
+        
+        # If any class is missing from training, move one donor from test to train
+        missing_classes = set(unique_adnc) - set(train_adnc)
+        if missing_classes:
+            print(f"Warning: Missing classes in training set: {missing_classes}")
+            for missing_class in missing_classes:
+                # Find a donor with this class in test set
+                test_donors_with_class = [d for d in test_donors if adnc_per_donor[d] == missing_class]
+                if test_donors_with_class:
+                    # Move one donor from test to train
+                    donor_to_move = test_donors_with_class[0]
+                    train_donors = np.append(train_donors, donor_to_move)
+                    test_donors = np.delete(test_donors, np.where(test_donors == donor_to_move)[0])
+                    print(f"Moved donor {donor_to_move} (class {missing_class}) from test to train")
+        
+        # Final verification for both train and test sets
+        final_train_adnc = adnc_per_donor[train_donors].unique()
+        final_test_adnc = adnc_per_donor[test_donors].unique()
+        print(f"Final training set ADNC classes: {final_train_adnc}")
+        print(f"Final test set ADNC classes: {final_test_adnc}")
+        print(f"All classes in training: {set(unique_adnc).issubset(set(final_train_adnc))}")
+        print(f"All classes in test: {set(unique_adnc).issubset(set(final_test_adnc))}")
+        
+        # If test set is missing classes, try to balance by moving donors
+        missing_test_classes = set(unique_adnc) - set(final_test_adnc)
+        if missing_test_classes:
+            print(f"Warning: Missing classes in test set: {missing_test_classes}")
+            # Try to move one donor of each missing class from train to test
+            for missing_class in missing_test_classes:
+                train_donors_with_class = [d for d in train_donors if adnc_per_donor[d] == missing_class]
+                if len(train_donors_with_class) > 1:  # Only move if we have more than one donor of this class in train
+                    donor_to_move = train_donors_with_class[0]
+                    test_donors = np.append(test_donors, donor_to_move)
+                    train_donors = np.delete(train_donors, np.where(train_donors == donor_to_move)[0])
+                    print(f"Moved donor {donor_to_move} (class {missing_class}) from train to test")
+        
+        # Final verification after balancing
+        final_train_adnc = adnc_per_donor[train_donors].unique()
+        final_test_adnc = adnc_per_donor[test_donors].unique()
+        print(f"Balanced training set ADNC classes: {final_train_adnc}")
+        print(f"Balanced test set ADNC classes: {final_test_adnc}")
+        print(f"All classes in training: {set(unique_adnc).issubset(set(final_train_adnc))}")
+        print(f"All classes in test: {set(unique_adnc).issubset(set(final_test_adnc))}")
     
     print(f"Train donors: {len(train_donors)}")
     print(f"Test donors: {len(test_donors)}")
+    
+    # Print donor IDs with their associated labels for verification
+    print("Train donors with their ADNC labels:")
+    for donor in sorted(train_donors.tolist()):
+        donor_label = adnc_per_donor[donor]
+        print(f"  {donor}: {donor_label}")
+    
+    print("Test donors with their ADNC labels:")
+    for donor in sorted(test_donors.tolist()):
+        donor_label = adnc_per_donor[donor]
+        print(f"  {donor}: {donor_label}")
+    
+    # Check for overlap between train and test donors
+    train_set = set(train_donors)
+    test_set = set(test_donors)
+    overlap = train_set.intersection(test_set)
+    if overlap:
+        print(f"❌ ERROR: Overlap found between train and test donors: {sorted(overlap)}")
+        raise ValueError(f"Train and test donors have overlap: {sorted(overlap)}")
+    else:
+        print("✅ No overlap between train and test donors")
     
     # Get cell indices for each split
     train_mask = np.isin(donors, train_donors)

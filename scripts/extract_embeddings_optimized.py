@@ -22,7 +22,10 @@ from accelerate import Accelerator
 
 # Import from utils and models
 import sys
-sys.path.append('/home/spark/xinze-project/dream')
+import os
+# Add the project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
 from utils.dataset_varlen import VariableLengthSequenceDataset, CSRMemmapDataset, pad_collate, load_labels_and_split_only
 from torch.utils.data import Dataset
 from models.model_ordinal_transformer import GeneTransformerOrdinal, coral_predict
@@ -86,7 +89,7 @@ def aggregate_by_donor_simple(embeddings, predictions, labels, donors, celltypes
                             # If no cells of this type, use zero embedding
                             celltype_embeddings.append(np.zeros(donor_rep_embeddings.shape[1]))
                     
-                    # Concatenate all cell type embeddings (24 x 16 = 384 dimensions)
+                    # Concatenate all cell type embeddings (24 cell types × embedding_dim dimensions)
                     donor_embedding = np.concatenate(celltype_embeddings, axis=0)
                     donor_embeddings[donor_rep_key] = donor_embedding
                     
@@ -120,7 +123,7 @@ def aggregate_by_donor_simple(embeddings, predictions, labels, donors, celltypes
                     # If no cells of this type, use zero embedding
                     celltype_embeddings.append(np.zeros(donor_cell_embeddings.shape[1]))
             
-            # Concatenate all cell type embeddings (24 x 16 = 384 dimensions)
+            # Concatenate all cell type embeddings (24 cell types × embedding_dim dimensions)
             donor_embedding = np.concatenate(celltype_embeddings, axis=0)
             donor_embeddings[donor] = donor_embedding
             
@@ -551,7 +554,7 @@ def extract_embeddings_with_sampling(model, dataset, device, output_dir, acceler
                     else:
                         celltype_embeddings.append(np.zeros(donor_embeddings_cells.shape[1]))
                 
-                # Concatenate all cell type embeddings (24 x 16 = 384 dimensions)
+                # Concatenate all cell type embeddings (24 cell types × embedding_dim dimensions)
                 donor_embedding = np.concatenate(celltype_embeddings, axis=0)
                 donor_embeddings[donor_rep_key] = donor_embedding
                 
@@ -576,7 +579,7 @@ def extract_embeddings_with_sampling(model, dataset, device, output_dir, acceler
                 else:
                     celltype_embeddings.append(np.zeros(donor_embeddings_cells.shape[1]))
             
-            # Concatenate all cell type embeddings (24 x 16 = 384 dimensions)
+            # Concatenate all cell type embeddings (24 cell types × embedding_dim dimensions)
             donor_embedding = np.concatenate(celltype_embeddings, axis=0)
             donor_embeddings[donor] = donor_embedding
             
@@ -592,7 +595,7 @@ def extract_embeddings_with_sampling(model, dataset, device, output_dir, acceler
             }
     
     print(f"Created {len(donor_embeddings)} donor embeddings")
-    print(f"Donor embedding dimension: {list(donor_embeddings.values())[0].shape[0]} (24 x 16 = 384)")
+    print(f"Donor embedding dimension: {list(donor_embeddings.values())[0].shape[0]} (24 cell types × {list(donor_embeddings.values())[0].shape[0]//24} embedding dim)")
     
     # Close the file
     try:
@@ -740,7 +743,7 @@ def extract_embeddings_simple(model, h5ad_path, split_json, device, output_dir, 
                     else:
                         celltype_embeddings.append(np.zeros(donor_embeddings_cells.shape[1]))
                 
-                # Concatenate all cell type embeddings (24 x 16 = 384 dimensions)
+                # Concatenate all cell type embeddings (24 cell types × embedding_dim dimensions)
                 donor_embedding = np.concatenate(celltype_embeddings, axis=0)
                 donor_embeddings[donor_rep_key] = donor_embedding
                 
@@ -765,7 +768,7 @@ def extract_embeddings_simple(model, h5ad_path, split_json, device, output_dir, 
                 else:
                     celltype_embeddings.append(np.zeros(donor_embeddings_cells.shape[1]))
             
-            # Concatenate all cell type embeddings (24 x 16 = 384 dimensions)
+            # Concatenate all cell type embeddings (24 cell types × embedding_dim dimensions)
             donor_embedding = np.concatenate(celltype_embeddings, axis=0)
             donor_embeddings[donor] = donor_embedding
             
@@ -781,7 +784,7 @@ def extract_embeddings_simple(model, h5ad_path, split_json, device, output_dir, 
             }
     
     print(f"Created {len(donor_embeddings)} donor embeddings")
-    print(f"Donor embedding dimension: {list(donor_embeddings.values())[0].shape[0]} (24 x 16 = 384)")
+    print(f"Donor embedding dimension: {list(donor_embeddings.values())[0].shape[0]} (24 cell types × {list(donor_embeddings.values())[0].shape[0]//24} embedding dim)")
     
     # Close the file
     try:

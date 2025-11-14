@@ -19,7 +19,10 @@ from collections import defaultdict
 
 # Import from utils and models
 import sys
-sys.path.append('/home/spark/xinze-project/dream')
+import os
+# Add the project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
 from utils.dataset_varlen import VariableLengthSequenceDataset, CSRMemmapDataset, pad_collate, load_labels_and_split_only
 from models.model_ordinal_transformer import GeneTransformerOrdinal, coral_predict
 
