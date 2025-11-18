@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score, cohen_kappa_score
 from scipy import sparse
 
 try:
@@ -44,9 +44,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--presets",
         type=str,
-        default="best_quality",
+        default="high_quality",
         choices=["best_quality", "high_quality", "good_quality", "medium_quality", "optimize_for_deployment"],
-        help="AutoGluon 预设模式，默认 best_quality",
+        help="AutoGluon 预设模式，默认 high_quality（减少过拟合）",
     )
     parser.add_argument(
         "--eval-metric",
@@ -64,6 +64,24 @@ def parse_args() -> argparse.Namespace:
         "--concat-donor-metadata",
         action="store_true",
         help="是否拼接 donor-level 统计特征到细胞特征",
+    )
+    parser.add_argument(
+        "--holdout-frac",
+        type=float,
+        default=0.1,
+        help="用于验证的 holdout 比例（0-1），默认 0.1",
+    )
+    parser.add_argument(
+        "--num-bag-folds",
+        type=int,
+        default=5,
+        help="Bagging 折数，默认 5（减少过拟合）",
+    )
+    parser.add_argument(
+        "--num-stack-levels",
+        type=int,
+        default=1,
+        help="Stacking 层数，默认 1（减少过拟合）",
     )
     return parser.parse_args()
 
@@ -132,6 +150,20 @@ def main() -> None:
         train_data=train_df,
         presets=args.presets,
         time_limit=args.time_limit,
+        holdout_frac=args.holdout_frac,
+        num_bag_folds=args.num_bag_folds,
+        num_stack_levels=args.num_stack_levels,
+        hyperparameters={
+            'GBM': [
+                {'num_leaves': 31, 'learning_rate': 0.05, 'feature_fraction': 0.8, 'min_data_in_leaf': 20},
+            ],
+            'CAT': [
+                {'depth': 6, 'learning_rate': 0.05, 'l2_leaf_reg': 3},
+            ],
+            'XGB': [
+                {'max_depth': 6, 'learning_rate': 0.05, 'subsample': 0.8, 'colsample_bytree': 0.8},
+            ],
+        },
     )
 
     # 查看模型排行榜
@@ -145,10 +177,19 @@ def main() -> None:
     test_prob = predictor.predict_proba(test_df.drop(columns=["label"]))[1].values
 
     # 计算指标
+    train_pred = (train_prob >= 0.5).astype(int)
+    test_pred = (test_prob >= 0.5).astype(int)
+    
     metrics = {
         "train": _collect_metrics(dataset.y_train, train_prob),
         "test": _collect_metrics(dataset.y_test, test_prob),
     }
+    
+    # 计算 QWK (Quadratic Weighted Kappa)
+    train_qwk = cohen_kappa_score(dataset.y_train, train_pred, weights='quadratic')
+    test_qwk = cohen_kappa_score(dataset.y_test, test_pred, weights='quadratic')
+    metrics["train"]["qwk"] = float(train_qwk)
+    metrics["test"]["qwk"] = float(test_qwk)
 
     # 保存指标
     metrics_path = output_dir / "metrics.json"
@@ -169,6 +210,12 @@ def main() -> None:
     test_metrics = metrics["test"]
     for key, value in test_metrics.items():
         print(f"{key}: {value:.4f}" if isinstance(value, float) else f"{key}: {value}")
+    
+    print("\n" + "=" * 60)
+    print("QWK (Quadratic Weighted Kappa):")
+    print("=" * 60)
+    print(f"Train QWK: {train_qwk:.6f}")
+    print(f"Test QWK:  {test_qwk:.6f}")
 
 
 def _collect_metrics(y_true: np.ndarray, prob: np.ndarray):

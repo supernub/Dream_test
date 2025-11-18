@@ -325,17 +325,48 @@ def _build_donor_metadata_features(
     donor_stats = []
     donor_label_col = label_column.lower().replace(" ", "_")
     
-    if donor_label_col in train_metadata.columns:
-        donor_label_counts = train_metadata.groupby(donor_col)[donor_label_col].agg(["sum", "count"])
-        donor_label_counts["positive_ratio"] = donor_label_counts["sum"] / donor_label_counts["count"]
-        donor_label_counts["negative_ratio"] = 1.0 - donor_label_counts["positive_ratio"]
-        donor_label_counts["log_cell_count"] = np.log1p(donor_label_counts["count"])
-        donor_stats.append(donor_label_counts[["positive_ratio", "negative_ratio", "log_cell_count"]])
+    # 排除与标签相关的列（防止数据泄露）
+    excluded_columns = [
+        "adnc", "ADNC",  # ADNC stage 信息（与标签相关，必须排除）
+        donor_label_col,  # 标签列本身
+        label_column,  # 标签列的原始名称
+        "binary_label",  # 二分类标签
+    ]
     
-    if "adnc" in train_metadata.columns:
-        adnc_dummies = pd.get_dummies(train_metadata[[donor_col, "adnc"]], columns=["adnc"], prefix="adnc")
-        adnc_ratios = adnc_dummies.groupby(donor_col).mean()
-        donor_stats.append(adnc_ratios)
+    if donor_label_col in train_metadata.columns:
+        # 只保留 cell count，移除 positive_ratio 和 negative_ratio（避免数据泄露）
+        donor_label_counts = train_metadata.groupby(donor_col)[donor_label_col].agg(["count"])
+        donor_label_counts["log_cell_count"] = np.log1p(donor_label_counts["count"])
+        donor_stats.append(donor_label_counts[["log_cell_count"]])
+    
+    # 添加其他有用的 donor metadata 特征（排除 ADNC 相关）
+    # 可以添加其他分类特征的统计，比如 Subclass 的分布等
+    # 但要确保这些特征不会泄露标签信息
+    categorical_cols = []
+    for col in train_metadata.columns:
+        col_lower = col.lower()
+        # 排除与标签相关的列
+        if any(excluded in col_lower for excluded in ["adnc", "label", "target", donor_label_col.lower()]):
+            continue
+        # 排除元数据列
+        if col in [donor_col, "cell_barcode", "orig_index", "subset_index"]:
+            continue
+        # 只考虑分类特征（可能有多个取值）
+        if train_metadata[col].dtype == 'object' or train_metadata[col].dtype.name == 'category':
+            unique_vals = train_metadata[col].nunique()
+            if 2 <= unique_vals <= 50:  # 排除只有一个值或值太多的列
+                categorical_cols.append(col)
+    
+    # 为分类特征创建 donor-level 统计（比例）
+    for col in categorical_cols:
+        try:
+            col_dummies = pd.get_dummies(train_metadata[[donor_col, col]], columns=[col], prefix=f"donor_{col.lower()}")
+            col_ratios = col_dummies.groupby(donor_col).mean()
+            donor_stats.append(col_ratios)
+        except Exception as e:
+            # 如果某个列处理失败，跳过
+            print(f"Warning: Failed to process column '{col}' as donor metadata: {e}")
+            continue
     
     if donor_stats:
         donor_feat_df = pd.concat(donor_stats, axis=1)
@@ -357,7 +388,13 @@ def _build_donor_metadata_features(
     default_values = donor_feat_df.mean().to_dict()
     for donor in all_donors:
         if donor not in donor_feat_df.index:
+            # 对于新 donor，先设置默认值
             donor_feat_df.loc[donor] = default_values
+            # 但是 log_cell_count 应该基于实际细胞数量计算（这是测试时可以观察到的）
+            # 这对于新 donor 是合理的，因为细胞数量在测试时可以观察到
+            if "log_cell_count" in donor_feat_df.columns:
+                donor_cell_count = (metadata[donor_col] == donor).sum()
+                donor_feat_df.loc[donor, "log_cell_count"] = np.log1p(donor_cell_count)
     
     # 将 donor 特征广播到每个细胞
     cell_donor_features = donor_feat_df.loc[metadata[donor_col].values].values
